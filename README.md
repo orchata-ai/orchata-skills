@@ -1,4 +1,4 @@
-# Orchata Skills v1
+# Orchata Skills
 
 A collection of skills for AI coding agents to interact with Orchata's knowledge management platform.
 
