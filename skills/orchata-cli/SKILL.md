@@ -2,7 +2,7 @@
 name: orchata-cli
 description: Use Orchata CLI commands to manage knowledge bases from the terminal. For shell/terminal operations only.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   author: Orchata AI
 ---
 
@@ -38,16 +38,10 @@ Orchata is a knowledge management platform that:
 
 ```bash
 # Install globally via npm
-npm install -g @orchata/cli
+npm install -g @orchata-ai/cli
 
 # Or via bun
-bun add -g @orchata/cli
-
-# Or via pnpm
-pnpm add -g @orchata/cli
-
-# Or via yarn
-yarn global add @orchata/cli
+bun add -g @orchata-ai/cli
 
 # Verify installation
 orchata --version
@@ -64,6 +58,9 @@ orchata login
 
 # 3. Verify connection
 orchata spaces list
+
+# 4. (Optional) Set a default space to avoid --space on every command
+orchata workspace set
 ```
 
 ### Environment Variables
@@ -78,6 +75,40 @@ export ORCHATA_PROFILE="production"
 ---
 
 ## CLI Commands Reference
+
+### Workspace Context
+
+Set a default space so you don't need `--space` on every command.
+
+#### Set default space (interactive picker)
+
+```bash
+orchata workspace set
+```
+
+Shows an interactive list of your spaces to choose from.
+
+#### Set default space by ID
+
+```bash
+orchata workspace set space_abc123
+```
+
+#### Show current default
+
+```bash
+orchata workspace show
+```
+
+#### Clear default
+
+```bash
+orchata workspace clear
+```
+
+Once a workspace is set, all commands that normally require `--space` will use the default automatically. You can still override with `--space <id>` on any command.
+
+---
 
 ### Space Management
 
@@ -124,28 +155,52 @@ orchata spaces delete space_abc123
 
 ```bash
 orchata documents list --space space_abc123
+
+# Or with a default workspace set:
+orchata documents list
 ```
 
-#### Upload a file
+#### Upload a single file
 
 ```bash
-orchata documents upload ./path/to/file.pdf --space space_abc123
-orchata documents upload ./guide.md --space space_abc123
+orchata documents upload ./report.pdf --space space_abc123
+orchata documents upload ./guide.md
+```
+
+#### Upload multiple files with glob patterns
+
+```bash
+# Upload all markdown files in a directory
+orchata documents upload docs/*.md --space space_abc123
+
+# Upload with metadata applied to all files
+orchata documents upload notes/*.md --metadata '{"tag":"drafts"}'
+```
+
+Files are batched automatically (up to 100 per request). A summary is shown:
+```
+Uploaded 12 file(s)
 ```
 
 #### Upload inline content
 
 ```bash
-orchata documents upload --space space_abc123 --content "# Title\n\nContent here..."
+orchata documents upload --content "# Title\n\nContent here..." --filename my-doc.md
 ```
 
-#### Batch upload (directory)
+#### Batch upload from JSON file
 
 ```bash
-orchata documents batch ./docs/ --space space_abc123
+orchata documents batch --file ./docs.json --space space_abc123
 ```
 
-**This is the most powerful CLI feature** - upload entire directories in one command!
+#### Upsert (create or update by filename)
+
+```bash
+orchata documents upsert --filename "brief.md" --content "# Updated content..."
+```
+
+If the filename already exists in the space, it updates the document. If new, it creates it.
 
 #### Get a document
 
@@ -162,14 +217,37 @@ orchata documents content doc_xyz789 --space space_abc123
 #### Append to a document
 
 ```bash
-orchata documents append doc_xyz789 --space space_abc123 --content "Additional content..."
+orchata documents append doc_xyz789 --content "Additional content..."
+```
+
+#### Get by filename
+
+```bash
+orchata documents get-by-filename --filename "guide.md"
 ```
 
 ---
 
 ### Querying
 
-#### Query a specific space
+#### Query with compact output
+
+```bash
+orchata query --compact "How do I authenticate?"
+```
+
+Output:
+```
+3 result(s):
+
+api-guide.md - Authentication
+  "To authenticate API requests, include your API key in the header..."
+
+handbook.pdf - Security Overview
+  "All API calls require authentication via Bearer token..."
+```
+
+#### Query with full JSON output
 
 ```bash
 orchata query "How do I authenticate?" --space space_abc123
@@ -178,12 +256,16 @@ orchata query "How do I authenticate?" --space space_abc123
 #### Query with more results
 
 ```bash
-orchata query "installation guide" --space space_abc123 --top-k 15
+orchata query "installation guide" --top-k 15
 ```
 
 **Options:**
-- `--space <id>` - Space ID to query (required for basic query)
+- `--space <id>` - Space ID to query (uses workspace default if set, or all spaces)
+- `--compact` - Human-readable output instead of JSON
 - `--top-k <n>` - Maximum number of results (default: 10)
+- `--threshold <n>` - Similarity threshold 0-1 (default: 0)
+- `--group-by-space` - Group results by space
+- `--metadata <json>` - Metadata filter
 
 #### Smart query (discover relevant spaces)
 
@@ -202,6 +284,7 @@ These options work with any command:
 ```bash
 orchata spaces list --profile production
 orchata query "test" --space space_123 --api-key oai_custom_key --json
+orchata documents delete doc_123 --yes
 ```
 
 **Available global options:**
@@ -210,37 +293,40 @@ orchata query "test" --space space_123 --api-key oai_custom_key --json
 - `--app-base <url>` - Override app base URL
 - `--api-key <key>` - Override API key for this run
 - `--json` - Output raw JSON (useful for scripting)
+- `-y, --yes` - Auto-confirm all prompts (non-interactive mode, ideal for agents/scripts)
 
 ---
 
 ## Common Patterns
 
-### Pattern 1: Upload files and query them
+### Pattern 1: First-time setup with workspace context
 
 ```bash
-# 1. Create a space
+# 1. Authenticate
+orchata login
+
+# 2. Create a space
 orchata spaces create --name "Docs" --description "Product documentation"
 # Returns: space_abc123
 
-# 2. Upload documents
-orchata documents upload ./handbook.pdf --space space_abc123
-orchata documents upload ./api-guide.md --space space_abc123
+# 3. Set it as your default workspace
+orchata workspace set space_abc123
 
-# 3. Wait ~1-3 seconds for processing, then query
-orchata query "authentication flow" --space space_abc123
+# 4. Now all commands use this space automatically
+orchata documents upload ./handbook.pdf
+orchata documents upload ./api-guide.md
+orchata query --compact "authentication flow"
 ```
 
-### Pattern 2: Batch upload directory
+### Pattern 2: Bulk upload with glob patterns
 
 ```bash
-# Upload all files in a directory
-orchata documents batch ./documentation/ --space space_abc123
-```
+# Upload all markdown files
+orchata documents upload ./documentation/*.md
 
-**This is ideal for:**
-- Initial knowledge base setup
-- Bulk document imports
-- Directory synchronization
+# Upload with metadata
+orchata documents upload ./drafts/*.md --metadata '{"source":"drafts"}'
+```
 
 ### Pattern 3: Discover and search
 
@@ -250,7 +336,7 @@ orchata query smart "billing questions"
 # Returns: space_billing (most relevant)
 
 # 2. Query that space
-orchata query "payment methods" --space space_billing
+orchata query --compact "payment methods" --space space_billing
 ```
 
 ### Pattern 4: Get raw JSON for scripting
@@ -258,16 +344,21 @@ orchata query "payment methods" --space space_billing
 ```bash
 # Get JSON output for parsing
 orchata spaces list --json | jq '.spaces[] | .id'
-orchata query "test" --space space_123 --json | jq '.results[0].content'
+orchata query "test" --space space_123 --json | jq '.results[0]'
 ```
 
-**Use JSON mode for:**
-- Shell scripts
-- CI/CD pipelines
-- Automation workflows
-- Data processing
+### Pattern 5: Non-interactive mode for agents/scripts
 
-### Pattern 5: Profile management for multiple environments
+```bash
+# Auto-confirm all prompts with --yes
+orchata workspace set --yes                    # Picks first space
+orchata documents delete doc_123 --yes         # No confirmation prompt
+
+# Combine with --json for fully deterministic automation
+orchata query "search term" --json --yes
+```
+
+### Pattern 6: Profile management for multiple environments
 
 ```bash
 # Login to different environments
@@ -293,10 +384,10 @@ orchata query "test" --space space_123 --profile production
 
 ```bash
 # List all documents with their status
-orchata documents list --space space_abc123
+orchata documents list
 
 # Check specific document
-orchata documents get doc_xyz789 --space space_abc123
+orchata documents get doc_xyz789
 ```
 
 **Supported file formats:**
@@ -314,19 +405,21 @@ orchata documents get doc_xyz789 --space space_abc123
 
 ### DO
 
-- **Use batch upload for directories** - `orchata documents batch` is efficient
+- **Set a default workspace** - `orchata workspace set` eliminates `--space` on every command
+- **Use glob upload for multiple files** - `orchata documents upload docs/*.md`
+- **Use `--compact` for quick lookups** - Human-readable query results
 - **Use `--json` flag for scripting** - Easy to parse programmatically
+- **Use `--yes` for automation** - No interactive prompts in scripts/agents
+- **Use `upsert` for iterative docs** - Avoids duplicates when re-uploading
 - **Wait 1-3 seconds after upload** - Give documents time to process
-- **Use descriptive space names and descriptions** - Helps with discovery
 - **Check document status before querying** - Only COMPLETED documents are searchable
-- **Use profiles for multiple environments** - dev, staging, production
 
 ### DON'T
 
 - **Don't query immediately after upload** - Wait for processing to complete
 - **Don't use very short queries** - More context = better results
 - **Don't forget to authenticate** - Run `orchata login` first
-- **Don't mix profile credentials** - Use `--profile` flag consistently
+- **Don't memorize space IDs** - Use `orchata workspace set` for interactive selection
 
 ---
 
@@ -336,11 +429,9 @@ orchata documents get doc_xyz789 --space space_abc123
 
 **Solution:**
 ```bash
-npm install -g @orchata/cli
+npm install -g @orchata-ai/cli
 orchata --version
 ```
-
-Verify the CLI is installed and in your PATH.
 
 ### "Authentication required"
 
@@ -351,12 +442,15 @@ orchata login
 export ORCHATA_API_KEY="oai_..."
 ```
 
-### "Space not found"
+### "No space specified"
 
 **Solution:**
 ```bash
-orchata spaces list
-# Use the exact space ID from the list
+# Set a default workspace
+orchata workspace set
+
+# Or pass explicitly
+orchata documents list --space space_abc123
 ```
 
 ### "Document still processing"
@@ -364,7 +458,7 @@ orchata spaces list
 **Solution:**
 Wait 1-3 seconds after upload for processing to complete:
 ```bash
-orchata documents list --space <space_id>
+orchata documents list
 # Check status field
 ```
 
@@ -384,18 +478,21 @@ The CLI stores configuration in `~/.orchata/config.json`:
 
 ```json
 {
+  "currentProfile": "cloud",
   "profiles": {
-    "default": {
+    "cloud": {
+      "mode": "cloud",
+      "apiBase": "https://api.orchata.ai/api",
+      "appBase": "https://app.orchata.ai",
       "apiKey": "oai_...",
-      "apiBase": "https://api.orchata.ai",
-      "appBase": "https://app.orchata.ai"
+      "defaultSpace": "space_abc123"
     },
-    "production": {
-      "apiKey": "oai_...",
-      "apiBase": "https://api.orchata.ai"
+    "local": {
+      "mode": "local",
+      "apiBase": "http://localhost:4747/api",
+      "appBase": "http://localhost:4747"
     }
-  },
-  "defaultProfile": "default"
+  }
 }
 ```
 
@@ -412,16 +509,18 @@ orchata configure --profile production --set-default
 
 | Task | Command |
 | ---- | ------- |
+| **Set default space** | `orchata workspace set` |
+| **Show default space** | `orchata workspace show` |
 | **List spaces** | `orchata spaces list` |
 | **Create space** | `orchata spaces create --name "Docs"` |
-| **Get space** | `orchata spaces get space_123` |
-| **List documents** | `orchata documents list --space space_123` |
-| **Upload file** | `orchata documents upload ./file.pdf --space space_123` |
-| **Batch upload** | `orchata documents batch ./dir/ --space space_123` |
-| **Get document** | `orchata documents get doc_123 --space space_123` |
-| **Search content** | `orchata query "question" --space space_123` |
+| **List documents** | `orchata documents list` |
+| **Upload file** | `orchata documents upload ./file.pdf` |
+| **Upload glob** | `orchata documents upload docs/*.md` |
+| **Upsert document** | `orchata documents upsert --filename "x.md" --content "..."` |
+| **Search (compact)** | `orchata query --compact "question"` |
+| **Search (JSON)** | `orchata query "question" --json` |
 | **Discover spaces** | `orchata query smart "question"` |
-| **JSON output** | `orchata spaces list --json` |
+| **Non-interactive** | `orchata <command> --yes` |
 
 ---
 
@@ -446,7 +545,7 @@ echo "Waiting for processing..."
 # Wait for completion
 while true; do
   STATUS=$(orchata documents get "${DOC_ID}" --space "${SPACE_ID}" --json | jq -r '.document.status')
-  
+
   if [ "$STATUS" = "COMPLETED" ]; then
     echo "Processing complete!"
     break
@@ -454,52 +553,29 @@ while true; do
     echo "Processing failed!"
     exit 1
   fi
-  
+
   echo "Status: ${STATUS}..."
   sleep 2
 done
 
 # Query
-orchata query "summary of document" --space "${SPACE_ID}"
+orchata query --compact "summary of document" --space "${SPACE_ID}"
 ```
 
-### Python: Batch upload with status checking
+### Bash: Agent-friendly bulk ingest
 
-```python
-import subprocess
-import json
-import time
+```bash
+#!/bin/bash
+# Non-interactive: uses --yes and --json throughout
 
-def run_orchata(command):
-    """Run orchata CLI command and return JSON result"""
-    cmd = f"orchata {command} --json"
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    return json.loads(result.stdout)
+SPACE_ID="space_abc123"
 
-# Create space
-space = run_orchata('spaces create --name "My Docs"')
-space_id = space['space']['id']
+# Upload all markdown files
+orchata documents upload ./docs/*.md --space "${SPACE_ID}" --json --yes
 
-# Batch upload
-print(f"Uploading to space: {space_id}")
-run_orchata(f'documents batch ./docs/ --space {space_id}')
-
-# Wait for all documents to process
-print("Waiting for processing...")
-while True:
-    docs = run_orchata(f'documents list --space {space_id}')
-    pending = [d for d in docs['documents'] if d['status'] != 'COMPLETED']
-    
-    if not pending:
-        print("All documents processed!")
-        break
-    
-    print(f"{len(pending)} documents still processing...")
-    time.sleep(3)
-
-# Query
-results = run_orchata(f'query "main topics" --space {space_id}')
-print(json.dumps(results, indent=2))
+# Wait and verify
+sleep 3
+orchata documents list --space "${SPACE_ID}" --json | jq '.documents[] | "\(.filename): \(.status)"'
 ```
 
 ---
@@ -507,15 +583,15 @@ print(json.dumps(results, indent=2))
 ## Differences from MCP Tools
 
 **CLI does NOT support:**
-- ❌ Tree-based document navigation (`get_document_tree`, `get_tree_node`)
-- ❌ Direct document updates (use upload with same filename to replace)
-- ❌ Compact query format (always returns full results)
+- Tree-based document navigation (`get_document_tree`, `get_tree_node`)
 
 **CLI excels at:**
-- ✅ Batch file operations (`orchata documents batch`)
-- ✅ Scripting and automation
-- ✅ JSON output for parsing
-- ✅ Profile management for multiple environments
-- ✅ File system integration
+- Glob-based batch file uploads (`orchata documents upload docs/*.md`)
+- Compact human-readable query output (`--compact`)
+- Workspace context persistence (`orchata workspace set`)
+- Non-interactive mode for agents (`--yes`)
+- Scripting and automation (`--json`)
+- Profile management for multiple environments
+- File system integration
 
 **For tree-based navigation and programmatic access, use the `orchata-mcp` skill instead.**
